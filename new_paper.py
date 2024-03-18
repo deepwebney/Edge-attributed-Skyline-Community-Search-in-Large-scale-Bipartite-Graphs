@@ -10,6 +10,10 @@ import heapq
 import time 
 import queue
 from tqdm import tqdm
+import logging
+
+logging.basicConfig(level=logging.INFO,filename='paper_peeling4test.log',filemode='w')
+logger = logging.getLogger()
 
 
 def get_data(path)->list:
@@ -87,17 +91,21 @@ def del_under_constrict(G, constrict, F=None):
                 if F is not None and ((edge[0],edge[1]) in F or (edge[1],edge[0]) in F):
                     return False
                 G.remove_edge(edge[0],edge[1])
+                break
     return True
 
 def peeling(G, q, alpha, beta, dim = 1, constrict = None, F=None):
     tmpG = copy.deepcopy(G)
     if constrict is not None:
         if del_under_constrict(tmpG, constrict, F) == False:
-            return G
+            return None
         else:
             tmpG = get_alpha_beta_core_new_include_q(tmpG, q, alpha, beta)
-    print('max include q has got', tmpG)
-    
+    logger.info('max include q has got {0} nodes and {1} edges'.format(tmpG.number_of_nodes(), tmpG.number_of_edges()))
+    if F is not None:
+        for i in F:
+            if not tmpG.has_edge(i[0], i[1]):
+                return None
     def get_min_edge(connectG, dim=1):
         edgelist = [i for i in connectG.edges(data=True)]
         edgelist.sort(key=lambda x:x[2]['weight{}'.format(dim)])
@@ -106,7 +114,8 @@ def peeling(G, q, alpha, beta, dim = 1, constrict = None, F=None):
     my_set = []
     my_queue = []
     max_iter = tmpG.number_of_edges()
-    pbar = tqdm(total=max_iter, desc='Peeling')
+    pbar = tqdm(total=max_iter, desc='Peeling dim:{}'.format(dim))
+    count= 0
     while tmpG.number_of_edges() != 0:
         pbar.update(1)
         try:
@@ -135,6 +144,7 @@ def peeling(G, q, alpha, beta, dim = 1, constrict = None, F=None):
                 R = list(nx.connected_components(G1))
                 for i in R:
                     if q in i:
+                        print('****************** note 1 *******************')
                         return G1.subgraph(i).copy()
             for neighbor in list(tmpG[u]):
                 edge_data = tmpG.get_edge_data(u, neighbor)
@@ -144,6 +154,7 @@ def peeling(G, q, alpha, beta, dim = 1, constrict = None, F=None):
                     R = list(nx.connected_components(G1))
                     for i in R:
                         if q in i:
+                            print('****************** note 2 *******************')
                             return G1.subgraph(i).copy()
                 tmpG.remove_edge(u, neighbor)
                 my_set.append((u, neighbor, edge_data))
@@ -155,8 +166,10 @@ def peeling(G, q, alpha, beta, dim = 1, constrict = None, F=None):
                         R = list(nx.connected_components(G1))
                         for i in R:
                             if q in i:
+                                print('****************** note 3 *******************')
                                 return G1.subgraph(i).copy()
-        my_set = []       
+        my_set = []
+        count += 1       
     return None
 
 def expand(G, alpha, beta, q, dim=1):
@@ -264,34 +277,179 @@ def peeling2D(G, q, alpha, beta, F=None, I=None):
         f1 = gpeel1D2f(peeling(tmpG, q, alpha, beta, 1, constrict, F), 1)
         if f1 == -1:
             break
+        for i in R:
+            if f1 <= i[0] and f2 <= i[1]:
+                return R
         R.append((f1, f2))
-        print('当前凝聚子图：', R)
+        logger.info('当前凝聚子图：{}'.format(R))
         constrict['2'] = 0
         constrict['1'] = f1 + 0.01
         f2 = gpeel1D2f(peeling(tmpG, q, alpha, beta, 2, constrict, F), 2)
     return R
     
 
-def 
-    
+def GetCandVal(G, alpha, beta, q, dim=3):
+    tmpG = get_alpha_beta_core_new_include_q(G, q, alpha, beta)
+    logger.info('max include q has got {}'.format(tmpG))
+    Fdim = []
+    def get_min_edge(connectG, dim=1):
+        edgelist = [i for i in connectG.edges(data=True)]
+        edgelist.sort(key=lambda x:x[2]['weight{}'.format(dim)])
+        for edge in edgelist:
+            yield edge
+    my_queue = []
+    max_iter = tmpG.number_of_edges()
+    pbar = tqdm(total=max_iter, desc='Finding F{}'.format(dim))
+    while tmpG.number_of_edges() != 0:
+        pbar.update(1)
+        try:
+            edge = next(get_min_edge(tmpG, dim))
+            e, dic = edge2weight(*edge)
+            Fdim.append(dic['weight{}'.format(dim)])
+            if not tmpG.has_edge(e[0], e[1]):
+                continue
+            tmpG.remove_edge(e[0], e[1])
+            up = e[0] if e[0].startswith('1') else e[1]
+            low = e[1] if e[1].startswith('2') else e[0]
+            if tmpG.degree[up] < alpha and up not in my_queue:
+                my_queue.append(up)
+            if tmpG.degree[low] < beta and low not in my_queue:
+                my_queue.append(low)
+        except:
+            break
+        while len(my_queue) != 0:
+            u = my_queue[0]
+            my_queue.pop(0)
+            for neighbor in list(tmpG[u]):
+                tmpG.remove_edge(u, neighbor)
+                if (neighbor.startswith('1') and tmpG.degree[neighbor] < alpha) or (neighbor.startswith('2') and tmpG.degree[neighbor] < beta):
+                    my_queue.append(neighbor)
+        tmpG = get_alpha_beta_core_new_include_q(tmpG, q, alpha, beta)      
+    return Fdim
+
+
+def peeling3D(G, q, alpha, beta, F=None, I=None):
+    tmpG = copy.deepcopy(G)
+    edgedic= {}
+    for edge in tmpG.edges():
+        try:
+            edgedic[tmpG.edges[edge]['weight{}'.format(3)]].append(edge)
+        except:
+            edgedic.update({tmpG.edges[edge]['weight{}'.format(3)]:[edge]})
+    F3 = GetCandVal(tmpG, alpha, beta, q, 3)
+    R = []
+    S = []
+    F3.reverse()
+    logger.info('F3总个数{}'.format(len(F3)))
+    if I is None:
+        tI = {'3':0}
+    else:
+        tI = copy.deepcopy(I)
+        tI.update({'3':0})
+    for f3 in tqdm(F3, desc='F3总轮次'):
+        if F is None:
+            tF = []
+        else:
+            tF = copy.deepcopy(F)
+        edgeslist = edgedic[f3]
+        for edge in edgeslist:
+            tF.append(edge)
+            tmpf1 = tmpG.edges[edge]['weight{}'.format(1)]
+            tmpf2 = tmpG.edges[edge]['weight{}'.format(2)]
+            ifcontinue = False
+            for prer in S:
+                if tmpf1 <= prer[0] and tmpf2 <= prer[1]:
+                    ifcontinue = True
+                    break
+            if ifcontinue == True:
+                break
+            tI['3'] = f3
+            T = peeling2D(tmpG, q, alpha, beta, tF, tI)
+            for item in T:
+                flag = False
+                for prer in S:
+                    if item[0] <= prer[0] and item[1] <= prer[1]:
+                        flag = True
+                        break
+                if flag == False:
+                    S.append(item)
+                    R.append(item+(f3,))
+    return R
+                
+def peelingHighD(G, q, alpha, beta, dim=4, F=None, I=None):
+    tmpG = copy.deepcopy(G)
+    if dim == 3:
+        return peeling3D(tmpG, q, alpha, beta, F, I)
+    edgedic= {}
+    for edge in tmpG.edges():
+        try:
+            edgedic[tmpG.edges[edge]['weight{}'.format(dim)]].append(edge)
+        except:
+            edgedic.update({tmpG.edges[edge]['weight{}'.format(dim)]:[edge]})
+    Fd = GetCandVal(tmpG, alpha, beta, q, dim)
+    R = []
+    S = [] 
+    Fd.reverse()
+    logger.info('F{}总个数{}'.format(dim, len(Fd)))
+    if I is None:
+        tI = {str(dim):0}
+    else:
+        tI = copy.deepcopy(I)
+        tI.update({str(dim):0})
+    for fd in tqdm(Fd, desc='F{}总轮次'.format(dim)):
+        if F is None:
+            tF = []
+        else:
+            tF = copy.deepcopy(F)
+        edgeslist = edgedic[fd]
+        for edge in edgeslist:
+            tF.append(edge)
+            tmpf_lst = []
+            for idx in range(dim-1):
+                tmpf_lst.append(tmpG.edges[edge]['weight{}'.format(idx+1)])
+            ifcontinue = False
+            for prer in S:
+                if all(x <= y for x, y in zip(tmpf_lst, prer)):
+                    ifcontinue = True
+                    break
+            if ifcontinue == True:
+                break
+            tI[str(dim)] = fd
+            T = peelingHighD(tmpG, q, alpha, beta, dim-1, tF, tI)
+            for item in T:
+                flag = False
+                for prer in S:
+                    if all(x <= y for x, y in zip(item, prer)):
+                        flag = True
+                        break
+                if flag == False:
+                    S.append(item)
+                    R.append(item+(fd,))
+    return R
+
 
 if __name__ == "__main__":
     path = './arxiv4dim.txt'
     q = '116'
     alpha, beta = 8, 2
     # path = './dim4graph.txt'
-    # q = '12'
-    # alpha, beta = 3, 2
+    # q = '22'
+    # alpha, beta = 2, 3
     data = get_data(path)
     G = build_bipartite_graph(data)
     connect_subgraph = get_alpha_beta_core_new_include_q(G, q, alpha, beta)
     origG = G.subgraph(connect_subgraph).copy()
     nx.set_edge_attributes(G, 0, "visited")
     starttime = time.time()
+    # print(GetCandVal(origG, alpha, beta, q, 3))
     # print(get_alpha_beta_core_new_include_q(G,q,alpha,beta))
     # pdb.set_trace()
     # print(peeling(origG, q, alpha, beta, 1))
     # print(expand(origG, alpha, beta, q, 1))
-    print(peeling2D(origG, q, alpha, beta))
+    # print(peeling2D(origG, q, alpha, beta))
+    res = peelingHighD(origG, q, alpha, beta, 4)
+    print(res)
+    logger.info(res)
     endtime = time.time()
     print(endtime - starttime)
+    logger.info(endtime - starttime)
