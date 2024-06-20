@@ -53,6 +53,8 @@ def edge2weight(u, v, att):
 def get_alpha_beta_core_new_include_q(tmpG, q, alpha, beta):
     # 验证输入图是否是二部图
     bipartite_graph = copy.deepcopy(tmpG)
+    if tmpG.number_of_edges()==0:
+        return bipartite_graph
     if not nx.is_bipartite(bipartite_graph):
         raise nx.NetworkXError("The input graph is not bipartite.")
 
@@ -172,87 +174,6 @@ def peeling(G, q, alpha, beta, dim = 1, constrict = None, F=None):
         count += 1       
     return None
 
-def expand(G, alpha, beta, q, dim=1):
-    tmpG = copy.deepcopy(G)
-    print('max include q has got', tmpG)
-    
-    def get_max_edge(connectG, dim=1):
-        edgelist = [i for i in connectG.edges(data=True)]
-        edgelist.sort(key=lambda x:x[2]['weight{}'.format(dim)], reverse=True)
-        return edgelist
-            
-    def lemma1(connectG):
-        return alpha * beta - alpha - beta <= connectG.number_of_edges() - connectG.number_of_nodes()
-
-    def lemma2(connectG):
-        number_upper, number_lower = 0, 0
-        for item in list(connectG.nodes):
-            if item.startswith('1') and connectG.degree(item) >= alpha:
-                number_upper += 1
-            elif item.startswith('2') and connectG.degree(item) >= beta:
-                number_lower += 1
-        return number_upper >= beta and number_lower >= alpha
-    
-    G1 = nx.Graph()
-    node_edges = sorted(tmpG.edges(q, data=True), key=lambda x: x[2]['weight{}'.format(dim)], reverse=True)
-    # 找到第4大的值，如果存在的话
-    limt = alpha if q.startswith('1') else beta
-    if len(node_edges) >= limt:
-        th_largest_value = node_edges[limt-1][2]['weight{}'.format(dim)]
-    else:
-        th_largest_value = node_edges[-1][2]['weight{}'.format(dim)]
-    print('find q th val', th_largest_value)
-    
-    edgelist = [i  for i in tmpG.edges(data=True) if i[2]['weight{}'.format(dim)] > th_largest_value]
-    G1.add_edges_from(edgelist)
-    tmpG.remove_edges_from(edgelist)
-    print(G1.number_of_edges())
-    print(tmpG.number_of_edges())
-    print(G1.has_node(q))
-    
-    pre_len = 0
-    edgelist = get_max_edge(tmpG, dim)
-    index = 0
-    max_iter = tmpG.number_of_edges()
-    pbar = tqdm(total=max_iter, desc='expanding')
-    while tmpG.number_of_edges() != 0:
-        pbar.update(1)
-        # print(tmpG.number_of_edges())
-        try:
-            edge = edgelist[index]
-            index += 1
-            e, dic = edge2weight(*edge)
-            if not tmpG.has_edge(e[0], e[1]):
-                continue
-            tmpG.remove_edge(e[0], e[1])
-            G1.add_edge(*e, **dic)
-            C1 = []
-            C1_list = list(nx.connected_components(G1))
-            for i in C1_list:
-                if q in i:
-                    C1 = i
-            C1G = G1.subgraph(C1).copy()
-            if C1G.number_of_edges() == pre_len or not lemma1(C1G) or not lemma2(C1G):
-                continue
-            if C1G.number_of_edges() >= 1.05*pre_len:
-                pre_len = C1G.number_of_edges()
-            else:
-                continue
-            C1G = get_alpha_beta_core_new_include_q(C1G, q, alpha, beta)
-            if C1G.has_node(q):
-                return peeling(C1G, q, alpha, beta, dim)
-        except:
-            break
-    C1 = []
-    C1_list = list(nx.connected_components(G1))
-    for i in C1_list:
-        if q in i:
-            C1 = i
-    C1G = G1.subgraph(C1).copy()
-    C1G = get_alpha_beta_core_new_include_q(C1G, q, alpha, beta)
-    if C1G.has_node(q):
-        return peeling(C1G, q, alpha, beta, dim)
-    return None
             
 def gpeel1D2f(G, dim):
     if G is None:
@@ -428,28 +349,61 @@ def peelingHighD(G, q, alpha, beta, dim=4, F=None, I=None):
     return R
 
 
+
 if __name__ == "__main__":
-    path = './arxiv4dim.txt'
-    q = '116'
-    alpha, beta = 8, 2
+    # path = '/home/yaodi/luoxuanpu/book4dim.txt'
+    # q = '123'
+    # alpha, beta = 5, 2
+    # path = '/home/yaodi/luoxuanpu/crime4dim.txt'
+    # q = '12'
+    # alpha, beta = 5, 1
+    # path = '/home/yaodi/luoxuanpu/arxiv4dim.txt'
+    # q = '132'
+    # alpha, beta = 5, 2
+    path = '/home/yaodi/luoxuanpu/crime4dim.txt'
+    q = '1128'
+    alpha, beta = 2, 2
     # path = './dim4graph.txt'
-    # q = '22'
-    # alpha, beta = 2, 3
+    # q = '12'
+    # alpha, beta = 3, 2
     data = get_data(path)
     G = build_bipartite_graph(data)
     connect_subgraph = get_alpha_beta_core_new_include_q(G, q, alpha, beta)
     origG = G.subgraph(connect_subgraph).copy()
-    nx.set_edge_attributes(G, 0, "visited")
+    print(len(origG.edges()))
+    # nx.set_edge_attributes(G, 0, "visited")
+    
+    # lst = [(285.9, 67.3, 137.7, 738.8), (369.7, 449.6, 57.1, 738.8), (390.8, 173.8, 15.9, 682.4), (285.9, 67.3, 551.9, 549.5), (544.2, 604.1, 137.7, 549.5), (612.5, 85.3, 120.9, 453.9), (544.2, 48.7, 694.7, 317.0), (686.4, 48.7, 137.7, 317.0), (503.3, 69.7, 160.2, 51.3), (185.6, 308.9, 204.4, 11.2)]
+    # lst = [(544.2, 48.7, 694.7), (285.9, 67.3, 551.9), (185.6, 308.9, 204.4), (503.3, 69.7, 160.2), (544.2, 604.1, 137.7), (686.4, 48.7, 137.7), (612.5, 85.3, 120.9)]
+    lst = [(544.2, 604.1), (612.5, 85.3), (686.4, 48.7)]
+    # lst = [(686.4,)]
+    # lst = [(0, 0, 0, 738.8)]
+    el = []
+    for i in lst:
+        for e in origG.edges(data=True):
+            f = True
+            for idx, v in enumerate(i):
+                if e[2]['weight{}'.format(idx+1)] < v:
+                    f = False
+                    break
+            if f == True:
+                el.append(e)
+        ag = nx.Graph()
+        ag.add_edges_from(el)
+        ag1 = get_alpha_beta_core_new_include_q(ag, q, alpha, beta)
+        print(len(ag1.edges()))
+    
+    
     starttime = time.time()
     # print(GetCandVal(origG, alpha, beta, q, 3))
     # print(get_alpha_beta_core_new_include_q(G,q,alpha,beta))
     # pdb.set_trace()
-    # print(peeling(origG, q, alpha, beta, 1))
+    print(gpeel1D2f(peeling(origG, q, alpha, beta, 4),4))
     # print(expand(origG, alpha, beta, q, 1))
     # print(peeling2D(origG, q, alpha, beta))
-    res = peelingHighD(origG, q, alpha, beta, 4)
-    print(res)
-    logger.info(res)
+    # res = peelingHighD(origG, q, alpha, beta, 3)
+    # print(res)
+    # logger.info(res)
     endtime = time.time()
     print(endtime - starttime)
     logger.info(endtime - starttime)
